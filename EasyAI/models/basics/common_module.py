@@ -249,4 +249,4 @@ class CSPLayer(BaseModule):
         hidden_channels = int(out_channels * expansion)
         self.conv1 = CNA(in_channels, hidden_channels, kernel_size=1,stride=1,act=act)
         self.conv2 = CNA(in_channels, hidden_channels, kernel_size=1, stride=1,act=act)
-        self.c
+

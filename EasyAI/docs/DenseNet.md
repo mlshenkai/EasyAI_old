@@ -14,6 +14,7 @@
 4. Transition Layer
 
 #### Dense Block
+concat([x1,x2,..xn-1])->DenseBlock->xn
 #### Composite function
  BatchNormalLayer+Relu+Conv(3X3)
 #### Pooling Layer
