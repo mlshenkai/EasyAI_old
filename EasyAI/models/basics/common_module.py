@@ -190,26 +190,26 @@ class Bottleneck(BaseModule):
         return y
 
 
-
 class ResLayer(BaseModule):
-    def __init__(self,
-                 in_channels: int,
-                 act="leakyrelu"):
+    def __init__(self, in_channels: int, act="leakyrelu"):
         super(ResLayer, self).__init__()
         min_channels = in_channels // 2
-        self.layer1 = CNA(in_channels,min_channels, kernel_size=1, stride=1,act=act)
-        self.layer2 = CNA(min_channels, min_channels, kernel_size=3,stride=1,act=act)
+        self.layer1 = CNA(in_channels, min_channels, kernel_size=1, stride=1, act=act)
+        self.layer2 = CNA(min_channels, min_channels, kernel_size=3, stride=1, act=act)
 
     def forward(self, x):
         out = self.layer2(self.layer1(x))
         return out
 
+
 class SPPBottleneck(BaseModule):
-    def __init__(self,
-                 in_channels: int,
-                 out_channels: int,
-                 kernel_size_list: list,
-                 act="silu"):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size_list: list = [5, 9, 13],
+        act="silu",
+    ):
         """
         Spatial pyramid pooling layer
         Args:
@@ -220,33 +220,91 @@ class SPPBottleneck(BaseModule):
         """
         super(SPPBottleneck, self).__init__()
         hidden_channel = in_channels // 2
-        self.conv1 = CNA(in_channels,out_channels,kernel_size=1,act=act)
+        self.conv1 = CNA(in_channels, out_channels, kernel_size=1, act=act)
         self.module_list = nn.ModuleList(
             [
-                nn.MaxPool2d(kernel_size=kernel_size,stride=1,padding=kernel_size//2)
+                nn.MaxPool2d(
+                    kernel_size=kernel_size, stride=1, padding=kernel_size // 2
+                )
                 for kernel_size in kernel_size_list
             ]
         )
         conv2_channels = hidden_channel * (len(kernel_size_list) + 1)
-        self.conv2 = CNA(conv2_channels, out_channels, kernel_size=1, stride=1,act=act)
+        self.conv2 = CNA(conv2_channels, out_channels, kernel_size=1, stride=1, act=act)
 
     def forward(self, x):
         x = self.conv1(x)
-        x = torch.cat([x]+[m(x) for m in self.module_list],dim=1)
+        x = torch.cat([x] + [m(x) for m in self.module_list], dim=1)
         x = self.conv2(x)
         return x
 
+
 class CSPLayer(BaseModule):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        num_block: int = 1,
+        shortcut: bool = True,
+        expansion: float = 0.5,
+        depthwise: bool = False,
+        act="silu",
+    ):
+        super(CSPLayer, self).__init__()
+        hidden_channels = int(out_channels * expansion)
+        self.conv1 = CNA(in_channels, hidden_channels, kernel_size=1, stride=1, act=act)
+        self.conv2 = CNA(in_channels, hidden_channels, kernel_size=1, stride=1, act=act)
+        self.conv3 = CNA(
+            2 * hidden_channels, out_channels, kernel_size=1, stride=1, act=act
+        )
+        module_list = [
+            Bottleneck(hidden_channels, hidden_channels, shortcut, 1.0, act=act)
+            for _ in range(num_block)
+        ]
+        self.m = nn.Sequential(*module_list)
+
+    def forward(self, x):
+        x_1 = self.conv1(x)
+        x_2 = self.conv2(x)
+        x_1 = self.m(x_1)
+        x = torch.cat([x_1, x_2], dim=1)
+        return self.conv3(x)
+
+
+class Focus(BaseModule):
     def __init__(self,
                  in_channels: int,
                  out_channels: int,
-                 num_block: int = 1,
-                 shortcut: bool = True,
-                 expansion: float = 0.5,
-                 depthwise: bool = False,
-                 act="silu"):
-        super(CSPLayer, self).__init__()
-        hidden_channels = int(out_channels * expansion)
-        self.conv1 = CNA(in_channels, hidden_channels, kernel_size=1,stride=1,act=act)
-        self.conv2 = CNA(in_channels, hidden_channels, kernel_size=1, stride=1,act=act)
+                 kernel_size: _size_2_t=1,
+                 stride: _size_2_t = 1,
+                 act="silu",):
+        """
+        融合宽高信息到channel space中
+        Args:
+            in_channels:
+            out_channels:
+            kernel_size:
+            stride:
+            act:
+        """
+
+        super(Focus, self).__init__()
+        self.conv = CNA(in_channels*4, out_channels, kernel_size,stride,act=act)
+
+    def forward(self, x):
+        # x: (B,C,W,H) -> y[b, 4C, W/2, H/2]
+        patch_top_left = x[...,::2, ::2]
+        patch_top_right = x[...,::2,1::2]
+        patch_bot_left = x[...,1::2, ::2]
+        patch_bot_right = x[...,1::2,1::2]
+        x = torch.cat(
+            [
+                patch_top_left,
+                patch_top_right,
+                patch_bot_left,
+                patch_bot_right
+            ],
+            dim=1
+        )
+        return self.conv(x)
 
